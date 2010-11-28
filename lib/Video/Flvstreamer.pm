@@ -11,11 +11,11 @@ Video::Flvstreamer - The great new Video::Flvstreamer!
 
 =head1 VERSION
 
-Version 0.01
+Version 0.02
 
 =cut
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 
 =head1 SYNOPSIS
@@ -64,8 +64,9 @@ sub new{
     $self->{flvstreamer} = '/usr/bin/flvstreamer';
     $self->{timeout}     = 10;
     $self->{try}         = 10;
+    $self->{debug}       = undef;
 
-    foreach( qw/flvstreamer timout socks/ ){
+    foreach( qw/flvstreamer timout socks debug/ ){
         if( $args->{$_} ){
             $self->{$_} = $args->{$_};
         }
@@ -109,25 +110,39 @@ sub get_raw{
             $args->{$_} = $self->{$_};
         }
     }
-    my @cmd = ( $args->{flvstreamer}, $raw, '--resume', '-q', '-o', '"' . $target . '"' );
+
+    my @cmd;
+    if( ref( $raw ) eq 'ARRAY' ){
+        @cmd = ( $args->{flvstreamer}, @$raw, '--resume',  '-q', '-o', $target );
+    }else{
+        @cmd = ( $args->{flvstreamer}, $raw, '--resume', '-q', '-o', $target );
+    }
 
     # Often transfer fails - retry till finished
     my $finished = undef;
     my $tries = 0;
-    while( ! $finished && $tries <= $self->{try}  ){
-        # In/Out/Err don't seem to be used by flvstreamer in -q mode...
-        my( $in, $out, $err );
-        if( run( \@cmd, \$in, \$out, \$err ) ){
-            $finished = 1;
-        }else{
-            # Try again.  The return value is stored in $?
+    my( $out, $err );
+  TRY_DOWNLOAD:
+    while( ! $finished and $tries < $self->{try}  ){
+        # Out/Err don't seem to be used by flvstreamer in -q mode...
+        if( $self->{debug} ){
+            printf( __PACKAGE__ . "->get_raw : cmd = %s\n", join( ' ', @cmd ) );
         }
+
+        if( run( \@cmd, undef, \$out, \$err ) ){
+            $finished = 1;
+        }elsif( $err ){
+            last TRY_DOWNLOAD;
+        }
+        # Try again.  The return value is stored in $?
         $tries++;
     }
     if( ! $finished ){
         die( "I tried $tries times, but couldn't complete download.\nCommand: " . 
              join( ' ', @cmd ) .
-             "\nReturn code: $?\n" );
+             "\nLast Return code: $?\n" .
+           "Last StdErr: $err\n" .
+           "Last StdOut: $out\n" );
     }
 }
 
@@ -166,10 +181,8 @@ sub get{
             push( @flv_opts, $args->{$_} );
         }
     }
-    # add the target where flvstreamer should save the stream to
-    push( @flv_opts, '"' . $target . '"' );
 
-    return $self->get_raw( join( ' ', @flv_opts ), $target, $args );
+    return $self->get_raw( \@flv_opts, $target, $args );
 }
 
 
